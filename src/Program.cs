@@ -94,6 +94,7 @@ if (response.FinishReason == ChatFinishReason.ToolCalls)
 
             string toolResult = hasFile ? ReadFile(filePath.GetString()!) : "The file_path argument must not be empty.";
             Console.Write(toolResult);
+            return;
             //messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
         }
         else
