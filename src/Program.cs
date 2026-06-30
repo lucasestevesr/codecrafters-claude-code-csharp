@@ -1,6 +1,7 @@
 using OpenAI;
 using OpenAI.Chat;
 using System.ClientModel;
+using System.Text.Json;
 
 //https://github.com/openai/openai-dotnet
 
@@ -30,11 +31,20 @@ var client = new ChatClient(
     options: new OpenAIClientOptions { Endpoint = new Uri(baseUrl) }
 );
 
+static string ReadFile(string filePath)
+{
+    if (!File.Exists(filePath))
+    {
+        throw new Exception($"File not found: {filePath}");
+    }
+    return File.ReadAllText(filePath);
+}
+
 /// <summary>
 /// link: https://github.com/openai/openai-dotnet?utm_source=chatgpt.com#how-to-use-chat-completions-with-tools-and-function-calling
 /// </summary> 
 ChatTool readTool = ChatTool.CreateFunctionTool(
-    functionName: "Read",
+    functionName: nameof(ReadFile),
     functionDescription: "Read and return the contents of a file",
     functionParameters: BinaryData.FromBytes("""
     {
@@ -55,10 +65,46 @@ ChatCompletionOptions options = new ChatCompletionOptions
     Tools = { readTool }
 };
 
+UserChatMessage userMessage = new UserChatMessage(prompt);
+
+List<ChatMessage> messages =
+[
+    userMessage
+];
+
 ChatCompletion response = client.CompleteChat(
-    [new UserChatMessage(prompt)],
+    messages,
     options
 );
+
+/// <summary>
+/// link: https://github.com/openai/openai-dotnet?utm_source=chatgpt.com#how-to-use-chat-completions-with-tools-and-function-calling
+/// ToolsCalls
+/// </summary>
+
+if (response.FinishReason == ChatFinishReason.ToolCalls)
+{
+    //messages.Add(new AssistantChatMessage(response));
+    foreach (ChatToolCall toolCall in response.ToolCalls)
+    {
+        if (toolCall.FunctionName == nameof(ReadFile))
+        {
+            using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
+            bool hasFile = argumentsJson.RootElement.TryGetProperty("file_path", out JsonElement filePath);
+
+            string toolResult = hasFile ? ReadFile(filePath.GetString()!) : "The file_path argument must not be empty.";
+            Console.Write(toolResult);
+            //messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
+        }
+        else
+        {
+            Console.Write(response.Content[0].Text);
+        }
+    }
+}
+
+//ChatCompletion completion = client.CompleteChat(messages, options);
+
 
 if (response.Content == null || response.Content.Count == 0)
 {
@@ -70,3 +116,4 @@ Console.Error.WriteLine("Logs from your program will appear here!");
 
 // TODO: Uncomment the line below to pass the first stage
 Console.Write(response.Content[0].Text);
+
