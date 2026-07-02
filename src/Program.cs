@@ -72,19 +72,25 @@ List<ChatMessage> messages =
     userMessage
 ];
 
-ChatCompletion response = client.CompleteChat(
-    messages,
-    options
-);
+while (true)
+{ 
+    ChatCompletion response = client.CompleteChat(
+        messages,
+        options
+    );
 
-/// <summary>
-/// link: https://github.com/openai/openai-dotnet?utm_source=chatgpt.com#how-to-use-chat-completions-with-tools-and-function-calling
-/// ToolsCalls
-/// </summary>
+    messages.Add(new AssistantChatMessage(response));
 
-if (response.FinishReason == ChatFinishReason.ToolCalls)
-{
-    //messages.Add(new AssistantChatMessage(response));
+    if (response.FinishReason != ChatFinishReason.ToolCalls)
+    {
+        if (response.Content == null || response.Content.Count == 0)
+        {
+            throw new Exception("No choices in response");
+        }
+        Console.Write(response.Content[0].Text);
+        return;
+    }
+
     foreach (ChatToolCall toolCall in response.ToolCalls)
     {
         if (toolCall.FunctionName == nameof(ReadFile))
@@ -93,28 +99,7 @@ if (response.FinishReason == ChatFinishReason.ToolCalls)
             bool hasFile = argumentsJson.RootElement.TryGetProperty("file_path", out JsonElement filePath);
 
             string toolResult = hasFile ? ReadFile(filePath.GetString()!) : "The file_path argument must not be empty.";
-            Console.Write(toolResult);
-            return;
-            //messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
-        }
-        else
-        {
-            Console.Write(response.Content[0].Text);
+            messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
         }
     }
 }
-
-//ChatCompletion completion = client.CompleteChat(messages, options);
-
-
-if (response.Content == null || response.Content.Count == 0)
-{
-    throw new Exception("No choices in response");
-}
-
-// You can use print statements as follows for debugging, they'll be visible when running tests.
-Console.Error.WriteLine("Logs from your program will appear here!");
-
-// TODO: Uncomment the line below to pass the first stage
-Console.Write(response.Content[0].Text);
-
