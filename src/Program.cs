@@ -46,6 +46,36 @@ static string WriteFile(string filePath, string content)
     return $"Successfully wrote to file: {filePath}";
 }
 
+static (string, string) ExecuteBashCommand(string command)
+{
+    var processInfo = new System.Diagnostics.ProcessStartInfo()
+    {
+        FileName = "/bin/sh",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+        WorkingDirectory = Directory.GetCurrentDirectory()
+    };
+
+    processInfo.ArgumentList.Add("-c");
+    processInfo.ArgumentList.Add(command);
+
+    using var process = new System.Diagnostics.Process
+    { 
+        StartInfo = processInfo
+    };
+    
+    process.Start();
+    
+    string stdout = process.StandardOutput.ReadToEnd();
+    string stderr = process.StandardError.ReadToEnd();
+    
+    process.WaitForExit();
+
+    return (stdout, stderr);
+}
+
 /// <summary>
 /// link: https://github.com/openai/openai-dotnet?utm_source=chatgpt.com#how-to-use-chat-completions-with-tools-and-function-calling
 /// </summary> 
@@ -87,9 +117,26 @@ ChatTool writeTool = ChatTool.CreateFunctionTool(
     """u8.ToArray())
     );
 
+ChatTool bashTool = ChatTool.CreateFunctionTool(
+    functionName: "Bash",
+    functionDescription: "Execute a shell command",
+    functionParameters: BinaryData.FromBytes("""
+    {
+        "type": "object",
+        "properties": {
+            "command": {
+                "type": "string",
+                "description": "The command to execute"
+            }
+        },
+        "required": ["command"]
+    }
+    """u8.ToArray())
+    );
+
 ChatCompletionOptions options = new ChatCompletionOptions
 {
-    Tools = { readTool, writeTool }
+    Tools = { readTool, writeTool, bashTool }
 };
 
 UserChatMessage userMessage = new UserChatMessage(prompt);
@@ -129,11 +176,22 @@ while (true)
             messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
         }
         else if (toolCall.FunctionName == "Write")
-        { 
+        {
             using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
             bool hasFile = argumentsJson.RootElement.TryGetProperty("file_path", out JsonElement filePath);
 
             string toolResult = hasFile ? WriteFile(filePath.GetString()!, argumentsJson.RootElement.GetProperty("content").GetString()!) : "The file_path argument must not be empty.";
+            messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
+        }
+        else if (toolCall.FunctionName == "Bash")
+        {
+            using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
+            bool hasCommand = argumentsJson.RootElement.TryGetProperty("command", out JsonElement command);
+            
+            (string stdout, string stderr) = hasCommand ? ExecuteBashCommand(command.GetString()!) : ("", "The command argument must not be empty.");
+
+            string toolResult = stdout is not null ? stdout : stderr;
+
             messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
         }
     }
