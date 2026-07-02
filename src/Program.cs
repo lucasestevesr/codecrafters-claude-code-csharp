@@ -40,11 +40,17 @@ static string ReadFile(string filePath)
     return File.ReadAllText(filePath);
 }
 
+static string WriteFile(string filePath, string content)
+{
+    File.WriteAllText(filePath, content);
+    return $"Successfully wrote to file: {filePath}";
+}
+
 /// <summary>
 /// link: https://github.com/openai/openai-dotnet?utm_source=chatgpt.com#how-to-use-chat-completions-with-tools-and-function-calling
 /// </summary> 
 ChatTool readTool = ChatTool.CreateFunctionTool(
-    functionName: nameof(ReadFile),
+    functionName: "Read",
     functionDescription: "Read and return the contents of a file",
     functionParameters: BinaryData.FromBytes("""
     {
@@ -60,9 +66,30 @@ ChatTool readTool = ChatTool.CreateFunctionTool(
     """u8.ToArray())
     );
 
+ChatTool writeTool = ChatTool.CreateFunctionTool(
+    functionName: "Write",
+    functionDescription: "Write content to a file",
+    functionParameters: BinaryData.FromBytes("""
+    {
+        "type": "object",
+        "properties": {
+            "file_path": {
+                "type": "string",
+                "description": "The path to the file to write"
+            },
+            "content": {
+                "type": "string",
+                "description": "The content to write to the file"
+            }
+        },
+        "required": ["file_path", "content"]
+    }
+    """u8.ToArray())
+    );
+
 ChatCompletionOptions options = new ChatCompletionOptions
 {
-    Tools = { readTool }
+    Tools = { readTool, writeTool }
 };
 
 UserChatMessage userMessage = new UserChatMessage(prompt);
@@ -93,12 +120,20 @@ while (true)
 
     foreach (ChatToolCall toolCall in response.ToolCalls)
     {
-        if (toolCall.FunctionName == nameof(ReadFile))
+        if (toolCall.FunctionName == "Read")
         {
             using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
             bool hasFile = argumentsJson.RootElement.TryGetProperty("file_path", out JsonElement filePath);
 
             string toolResult = hasFile ? ReadFile(filePath.GetString()!) : "The file_path argument must not be empty.";
+            messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
+        }
+        else if (toolCall.FunctionName == "Write")
+        { 
+            using JsonDocument argumentsJson = JsonDocument.Parse(toolCall.FunctionArguments);
+            bool hasFile = argumentsJson.RootElement.TryGetProperty("file_path", out JsonElement filePath);
+
+            string toolResult = hasFile ? WriteFile(filePath.GetString()!, argumentsJson.RootElement.GetProperty("content").GetString()!) : "The file_path argument must not be empty.";
             messages.Add(new ToolChatMessage(toolCall.Id, toolResult));
         }
     }
